@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
 
     # 通用ai参数
-    ai_max_tokens: int = 4096
+    ai_max_tokens: int = 8192
     ai_temperature: float = 0.1
     ai_max_retries: int = 3
 
