@@ -40,7 +40,7 @@ class TestCase(Base):
             return json.loads(self.body)
         return None
 
-    def get_assertions_dict(self) -> list[str] | None:
+    def get_assertions_list(self) -> list[str] | None:
         if self.assertions:
             return json.loads(self.assertions)
         return None
