@@ -1,11 +1,20 @@
 import json
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 
-from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy import String, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.dao.database import Base
+
+
+class TaskStatus(str, Enum):
+    """AI 生成任务状态"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class TestCase(Base):
@@ -21,6 +30,9 @@ class TestCase(Base):
     expected_status: Mapped[int] = mapped_column(default=200, comment="期望状态码")
     assertions: Mapped[Optional[str]] = mapped_column(Text, default=None, comment="检查响应体中的字段值")
     source: Mapped[str] = mapped_column(String(20), default="manual", comment="区分 手动创建/AI生成")
+    category: Mapped[Optional[str]] = mapped_column(String(20), default=None, comment="用例分类: happy_path/boundary/error/auth_failure")
+    description: Mapped[Optional[str]] = mapped_column(String(500), default=None, comment="用例描述")
+    priority: Mapped[Optional[str]] = mapped_column(String(10), default="medium", comment="优先级: high/medium/low")
     created_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(timezone.utc), comment="创建时间"
     )
@@ -61,3 +73,22 @@ class Execution(Base):
     )
 
     test_case: Mapped["TestCase"] = relationship(back_populates="executions")
+
+
+class Task(Base):
+    """AI 生成任务表，追踪异步任务状态"""
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, comment="UUID")
+    type: Mapped[str] = mapped_column(String(30), comment="任务类型: ai_generate")
+    status: Mapped[str] = mapped_column(String(20), default=TaskStatus.PENDING.value, comment="任务状态")
+    result: Mapped[Optional[dict]] = mapped_column(JSON, default=None, comment="任务结果 JSON")
+    error: Mapped[Optional[str]] = mapped_column(Text, default=None, comment="错误信息")
+    created_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(timezone.utc), comment="创建时间"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        comment="更新时间",
+    )

@@ -24,6 +24,9 @@ def _case_to_response(case: TestCase) -> CaseResponse:
         expected_status=case.expected_status,
         assertions=case.get_assertions_list(),
         source=CaseSource(case.source),
+        category=case.category,
+        description=case.description,
+        priority=case.priority,
         created_at=case.created_at,
     )
 

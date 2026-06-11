@@ -22,4 +22,9 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # 通用ai参数
+    ai_max_tokens: int = 4096
+    ai_temperature: float = 0.1
+    ai_max_retries: int = 3
+
 settings = Settings()

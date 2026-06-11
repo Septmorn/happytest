@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.cases import router as cases_router
+from app.api.routes.ai_routes import router as ai_router
 from app.dao.database import Base, engine
 
 
@@ -32,6 +33,7 @@ app = FastAPI(
 )
 
 app.include_router(cases_router)
+app.include_router(ai_router)
 
 @app.get("/health", tags=["系统"])
 def health_check():

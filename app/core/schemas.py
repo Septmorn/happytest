@@ -60,6 +60,9 @@ class CaseResponse(BaseModel):
     expected_status: int
     assertions: Optional[list[str]] = None
     source: CaseSource
+    category: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}  # 允许从 ORM 对象直接转换
