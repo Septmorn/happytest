@@ -4,9 +4,11 @@ FastAPI应用入口，创建应用实例、注册路由、启动时初始化数�
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.cases import router as cases_router
 from app.api.routes.ai_routes import router as ai_router
+from app.api.routes.pipeline_routes import router as pipeline_router
 from app.dao.database import Base, engine
 
 
@@ -32,8 +34,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",    # Vite 开发服务器
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(cases_router)
 app.include_router(ai_router)
+app.include_router(pipeline_router)
 
 @app.get("/health", tags=["系统"])
 def health_check():
