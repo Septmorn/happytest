@@ -1,0 +1,56 @@
+"""
+自动生成的API测试文件
+生成时间: {{ generated_at }}
+项目: {{ project_name }}
+用例数: {{ cases | length }}
+"""
+import pytest
+import requests
+
+BASE_URL = "{{ base_url }}"
+
+{% for case in cases %}
+
+
+def test_{{case.name | replace("-", "_")}}():
+    """
+    {{ case.description }}
+    分类: {{ case.category }}
+    优先级: {{ case.priority | default("medium") }}
+    """
+    url = f"{BASE_URL}{{ case.url }}"
+    headers = {{ case.headers | default({}) | tojson }}
+    {% if case.body %}
+    payload = {{ case.body | tojson }}
+    {% else %}
+    payload = None
+    {% endif %}
+    {% if case.query_params %}
+    params = {{ case.query_params | tojson }}
+    {% else %}
+    params = None
+    {% endif %}
+
+    response = requests.{{ case.method | lower }}(
+        url,
+        headers=headers,
+        {% if case.method | upper in ["POST", "PUT", "PATCH"] %}
+        json=payload,
+        {% endif %}
+        params=params,
+        timeout=10,
+    )
+
+    # 状态码断言
+    assert response.status_code == {{ case.expected_status }}, \
+        f"期望状态码 {{ case.expected_status }}，实际 {response.status_code}，响应: {response.text[:200]}"
+    {% if case.assertions %}
+
+    # 自定义断言
+    {% for assertion in case.assertions %}
+    {{ assertion }}
+    {% endfor %}
+    {% endif %}
+
+
+{% endfor %}
