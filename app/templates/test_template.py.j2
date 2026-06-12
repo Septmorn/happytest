@@ -6,8 +6,18 @@
 """
 import pytest
 import requests
+import uuid
 
 BASE_URL = "{{ base_url }}"
+
+
+def _unique(value: str) -> str:
+    """为字符串值附加随机后缀，避免测试之间的数据冲突"""
+    suffix = uuid.uuid4().hex[:6]
+    if "@" in value:
+        local, domain = value.rsplit("@", 1)
+        return f"{local}_{suffix}@{domain}"
+    return f"{value}_{suffix}"
 
 {% for case in cases %}
 
@@ -22,6 +32,11 @@ def test_{{case.name | replace("-", "_")}}():
     headers = {{ case.headers | default({}) | tojson }}
     {% if case.body %}
     payload = {{ case.body | tojson }}
+    # 对唯一性字段做随机化，避免测试间数据冲突
+    if "username" in payload and isinstance(payload["username"], str) and len(payload["username"]) >= 3:
+        payload["username"] = _unique(payload["username"])
+    if "email" in payload and isinstance(payload["email"], str) and "@" in payload["email"]:
+        payload["email"] = _unique(payload["email"])
     {% else %}
     payload = None
     {% endif %}

@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 import time
 
+from json_repair import repair_json
 from openai import OpenAI, RateLimitError, APITimeoutError, APIError
 
 from app.core.config import settings
@@ -34,7 +35,14 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         api_key=settings.deepseek_api_key,
         max_tokens=settings.ai_max_tokens,
         temperature=settings.ai_temperature,
-    )
+    ),
+    "deepseek-pro": ModelConfig(
+        name=settings.deepseek_pro_model,
+        base_url=settings.deepseek_base_url,
+        api_key=settings.deepseek_api_key,
+        max_tokens=settings.ai_max_tokens,
+        temperature=settings.ai_temperature,
+    ),
 }
 
 # ─────────────────────────────────────────────
@@ -44,11 +52,11 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 SYSTEM_PROMPT = """你是一位拥有10年经验的资深QA工程师，专精API自动化测试。
 你的任务是：分析用户提供的API文档，生成全面的测试用例集。
 生成规则：
-1. 每个API至少生成以下四类用例：
+1. 每个API至少生成以下类型的用例：
    - happy_path: 正常参数，验证成功响应
    - boundary: 边界值（空字符串、最大长度、最小值/最大值、特殊字符）
    - error: 异常输入（类型错误、格式错误、缺少必填字段）
-   - auth_failure: 认证失败（无token、过期token、无权限）
+   - auth_failure: 认证失败（仅当文档明确说明该接口需要认证时才生成此类用例；如果文档未提及认证要求，不要生成auth_failure用例）
 2. 用例命名规范：{HTTP方法}_{路径关键词}_{场景描述}
    示例：POST_register_success, POST_register_empty_username
 3. 对于每个用例，必须指定精确的请求参数和期望结果。
@@ -56,9 +64,15 @@ SYSTEM_PROMPT = """你是一位拥有10年经验的资深QA工程师，专精API
    - 字符串：空串、单字符、超长(256+字符)、含特殊字符
    - 数字：0、-1、最大值、浮点数
    - 必填字段：逐一缺省测试
-5. 输出格式要求：直接输出一个 JSON 对象，格式如下（不要输出多余的文字说明）：
+5. 期望状态码规则（严格遵守）：
+   - 参数校验失败（类型错误、格式不符、缺少必填字段、长度越界）→ 422（FastAPI/Pydantic 的默认行为）
+   - 业务逻辑拒绝（如重复注册）→ 409
+   - 业务层面的非法值（需要API自身校验的规则，如密码复杂度、邮箱格式）→ 如果文档说API会返回400则用400，否则根据文档给定的错误码
+   - 认证失败 → 401
+   - 注意区分：Pydantic schema 能拦截的（min_length/max_length/类型）返回422；API业务代码才能校验的（格式正则、复杂度规则）返回文档指定的错误码
+6. 输出格式要求：直接输出一个 JSON 对象，格式如下（不要输出多余的文字说明）：
 {"test_cases": [{"name": "...", "method": "...", "url": "...", "headers": {...}, "body": {...}, "expected_status": 200, "assertions": [...], "category": "...", "description": "...", "priority": "high/medium/low"}, ...]}
-6. JSON 值必须是字面量，禁止使用编程表达式（如 "a" * 10 或字符串拼接），超长字符串直接写出实际内容或用省略代替。
+7. JSON 值必须是字面量，禁止使用编程表达式（如 "a" * 10 或字符串拼接），超长字符串直接写出实际内容或用省略代替。
 """
 
 # ─────────────────────────────────────────────
@@ -98,8 +112,19 @@ class AIService:
         :raise: AIServiceError: LLM 调用失败或返回格式异常
         """
         messages = self._build_messages(api_doc)
-        response = self._call_with_retry(messages)
-        return self._parse_response(response)
+
+        # 解析失败时最多重试 2 次（共 3 次尝试）
+        last_error = None
+        for attempt in range(3):
+            response = self._call_with_retry(messages)
+            try:
+                return self._parse_response(response)
+            except AIServiceError as e:
+                last_error = e
+                logger.warning(f"JSON 解析失败（第{attempt + 1}次），重试: {e}")
+                continue
+
+        raise last_error
 
     def _build_messages(self, api_doc: str) -> list[dict]:
         """构建发送给LLM的消息列表"""
@@ -154,13 +179,32 @@ class AIService:
     def _parse_response(self, response) -> list[dict]:
         """解析 LLM 返回的 JSON 结果，提取测试用例列表。"""
         content = response.choices[0].message.content
+        if not content or not content.strip():
+            raise AIServiceError("LLM 返回了空内容")
+
+        # 第一步：标准 json.loads
+        data = None
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
-            # response_format=json_object 理论上不会到这里，加防御
+            pass
+
+        # 第二步：使用 json_repair 修复常见错误（缺逗号、trailing comma、截断等）
+        if data is None:
+            try:
+                repaired = repair_json(content, return_objects=True)
+                if isinstance(repaired, (dict, list)):
+                    data = repaired
+                    logger.info("json_repair 成功修复了 LLM 输出")
+            except Exception:
+                pass
+
+        # 第三步：旧的截断修复兜底
+        if data is None:
             data = self._try_fix_truncated_json(content)
-            if data is None:
-                raise AIServiceError("LLM 返回的 JSON 格式无效")
+
+        if data is None:
+            raise AIServiceError("LLM 返回的 JSON 格式无效，修复尝试均失败")
 
         if isinstance(data, dict):
             test_cases = data.get("test_cases", [])

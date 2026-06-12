@@ -77,8 +77,9 @@ class ExecutorService:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=timeout,
-                cwd=str(Path(test_file).parent),  # 在测试文件所在目录执行
+                cwd=str(Path(test_file).parent),
             )
 
             logger.info(f"pytest 退出码: {result.returncode}")
