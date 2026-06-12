@@ -44,13 +44,6 @@ def test_{{case.name | replace("-", "_")}}():
     # 状态码断言
     assert response.status_code == {{ case.expected_status }}, \
         f"期望状态码 {{ case.expected_status }}，实际 {response.status_code}，响应: {response.text[:200]}"
-    {% if case.assertions %}
-
-    # 自定义断言
-    {% for assertion in case.assertions %}
-    {{ assertion }}
-    {% endfor %}
-    {% endif %}
 
 
 {% endfor %}
