@@ -27,6 +27,16 @@ logger = logging.getLogger("happytest-mcp")
 
 # 创建MCP Server实例
 server = Server("happytest")
+_rag_service = None
+
+
+def _get_rag_service():
+    """延迟初始化 RAGService，避免 MCP Server 启动时加载 embedding 模型。"""
+    global _rag_service
+    if _rag_service is None:
+        from app.service.rag_service import RAGService
+        _rag_service = RAGService()
+    return _rag_service
 
 # ============================================================
 # 工具定义：通过 list_tools 让客户端发现我们提供的能力
@@ -107,6 +117,11 @@ async def list_tools() -> list[Tool]:
                     "question": {
                         "type": "string",
                         "description": "要查询的问题",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "检索片段数量，默认 5",
+                        "default": 5,
                     },
                 },
                 "required": ["question"],
@@ -221,14 +236,30 @@ async def _handle_run_test_suite(args: dict[str, Any]) -> dict:
 
 
 async def _handle_ask_knowledge_base(args: dict[str, Any]) -> dict:
-    """
-    查询 RAG 知识库。
-    """
+    """查询 RAG 知识库。"""
+    question = args["question"].strip()
+    if not question:
+        raise ValueError("question 不能为空")
+
+    top_k = int(args.get("top_k", 5))
+    if top_k < 1:
+        raise ValueError("top_k 必须大于 0")
+
+    answer = await _get_rag_service().ask(question, top_k=top_k)
+
     return {
-        "question": args["question"],
-        "answer": "RAG 知识库尚未配置，请先完成知识库搭建后再使用此工具。",
-        "sources": [],
-        "confidence": 0.0,
+        "question": question,
+        "answer": answer.text,
+        "sources": [
+            {
+                "source": source.source,
+                "source_type": source.source_type,
+                "chunk_index": source.chunk_index,
+                "relevance_score": source.score,
+            }
+            for source in answer.sources
+        ],
+        "confidence": answer.confidence,
     }
 
 
