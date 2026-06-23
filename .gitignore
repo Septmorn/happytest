@@ -65,5 +65,10 @@ happytest-manual/
 # Claude Code
 CLAUDE.md
 
+# OpenCode / agent memory
+AGENTS.md
+
 # just for fun
 just_for_fun.py
+
+docs/

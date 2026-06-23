@@ -35,7 +35,7 @@ async def test_list_tools():
 
 @pytest.mark.asyncio
 async def test_query_test_cases():
-    """测试查询用例工具。"""
+    """测试查询用例工具"""
     async with stdio_client(SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -50,10 +50,9 @@ async def test_query_test_cases():
             assert "cases" in data
             assert data["project"] == "demo"
 
-
 @pytest.mark.asyncio
 async def test_run_test_suite():
-    """测试执行套件工具。"""
+    """测试执行套件工具"""
     async with stdio_client(SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -71,7 +70,7 @@ async def test_run_test_suite():
 
 @pytest.mark.asyncio
 async def test_ask_knowledge_base():
-    """测试知识库查询工具。"""
+    """测试知识库查询工具"""
     async with stdio_client(SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

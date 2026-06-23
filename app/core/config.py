@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     # ChromaDB配置
     chroma_persist_dir: str
+
+    # Embedding 配置
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    
     #应用配置
     app_env: str = "development"
     log_level: str = "INFO"

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.cases import router as cases_router
 from app.api.routes.ai_routes import router as ai_router
 from app.api.routes.pipeline_routes import router as pipeline_router
+from app.api.routes.rag_routes import router as rag_router
 from app.dao.database import Base, engine
 
 
@@ -48,7 +49,7 @@ app.add_middleware(
 app.include_router(cases_router)
 app.include_router(ai_router)
 app.include_router(pipeline_router)
-
+app.include_router(rag_router)
 @app.get("/health", tags=["系统"])
 def health_check():
     """健康检查接口"""
