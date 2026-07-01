@@ -46,6 +46,97 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 }
 
 # ─────────────────────────────────────────────
+# Function Calling Schema
+# ─────────────────────────────────────────────
+
+GENERATE_CASES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "save_test_cases",
+        "description": "保存AI生成的API测试用例列表到系统中",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "test_cases": {
+                    "type": "array",
+                    "description": "测试用例列表",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "用例名称，格式: METHOD_path_scenario",
+                            },
+                            "method": {
+                                "type": "string",
+                                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                            },
+                            "url": {
+                                "type": "string",
+                                "description": "完整请求路径，如 /api/users/register",
+                            },
+                            "headers": {
+                                "type": "object",
+                                "description": "请求头键值对",
+                            },
+                            "body": {
+                                "type": "object",
+                                "description": "请求体 JSON，GET 请求可为空对象",
+                            },
+                            "query_params": {
+                                "type": "object",
+                                "description": "URL 查询参数",
+                            },
+                            "expected_status": {
+                                "type": "integer",
+                                "description": "期望的HTTP响应状态码",
+                            },
+                            "assertions": {
+                                "type": "array",
+                                "description": "额外断言表达式列表",
+                                "items": {"type": "string"},
+                            },
+                            "category": {
+                                "type": "string",
+                                "enum": [
+                                    "happy_path",
+                                    "boundary",
+                                    "error",
+                                    "auth_failure",
+                                ],
+                                "description": "用例分类",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "用例的中文描述",
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low"],
+                                "description": "优先级",
+                            },
+                        },
+                        "required": [
+                            "name",
+                            "method",
+                            "url",
+                            "headers",
+                            "body",
+                            "expected_status",
+                            "assertions",
+                            "category",
+                            "description",
+                            "priority",
+                        ],
+                    },
+                }
+            },
+            "required": ["test_cases"],
+        },
+    },
+}
+
+# ─────────────────────────────────────────────
 # System Prompt
 # ─────────────────────────────────────────────
 
@@ -70,8 +161,7 @@ SYSTEM_PROMPT = """你是一位拥有10年经验的资深QA工程师，专精API
    - 业务层面的非法值（需要API自身校验的规则，如密码复杂度、邮箱格式）→ 如果文档说API会返回400则用400，否则根据文档给定的错误码
    - 认证失败 → 401
    - 注意区分：Pydantic schema 能拦截的（min_length/max_length/类型）返回422；API业务代码才能校验的（格式正则、复杂度规则）返回文档指定的错误码
-6. 输出格式要求：直接输出一个 JSON 对象，格式如下（不要输出多余的文字说明）：
-{"test_cases": [{"name": "...", "method": "...", "url": "...", "headers": {...}, "body": {...}, "expected_status": 200, "assertions": [...], "category": "...", "description": "...", "priority": "high/medium/low"}, ...]}
+6. 必须通过 save_test_cases 函数输出所有测试用例，不要用自然语言描述。
 7. JSON 值必须是字面量，禁止使用编程表达式（如 "a" * 10 或字符串拼接），超长字符串直接写出实际内容或用省略代替。
 """
 
@@ -118,10 +208,10 @@ class AIService:
         for attempt in range(3):
             response = self._call_with_retry(messages)
             try:
-                return self._parse_response(response)
+                return self._parse_function_call(response)
             except AIServiceError as e:
                 last_error = e
-                logger.warning(f"JSON 解析失败（第{attempt + 1}次），重试: {e}")
+                logger.warning(f"Function Calling 解析失败（第{attempt + 1}次），重试: {e}")
                 continue
 
         raise last_error
@@ -135,7 +225,7 @@ class AIService:
 ## 要求：
 - 覆盖 happy_path、boundary、error、auth_failure 四类场景
 - 每类至少2个用例
-- 直接输出 JSON 对象，格式为 {{"test_cases": [...]}}，不要输出其他内容
+- 通过 save_test_cases 函数输出结果
 """
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -148,13 +238,16 @@ class AIService:
                 response = self.client.chat.completions.create(
                     model=self.model_config.name,
                     messages=messages,
+                    tools=[GENERATE_CASES_TOOL],
+                    tool_choice={
+                        "type": "function",
+                        "function": {"name": "save_test_cases"},
+                    },
                     max_tokens=self.model_config.max_tokens,
                     temperature=self.model_config.temperature,
-                    response_format={"type": "json_object"},
                 )
-                # 官方文档提示 JSON Output 有概率返回空 content，遇到时重试
-                if not response.choices[0].message.content:
-                    logger.warning(f"LLM 返回空 content，重试 (第{attempt + 1}次)")
+                if not response.choices[0].message.tool_calls:
+                    logger.warning(f"LLM 未返回 tool_calls，重试 (第{attempt + 1}次)")
                     continue
                 return response
             except RateLimitError as e:
@@ -176,11 +269,19 @@ class AIService:
 
         raise AIServiceError(f"LLM 调用在 {max_retries} 次重试后仍然失败")
 
-    def _parse_response(self, response) -> list[dict]:
-        """解析 LLM 返回的 JSON 结果，提取测试用例列表。"""
-        content = response.choices[0].message.content
+    def _parse_function_call(self, response) -> list[dict]:
+        """解析 LLM 返回的 Function Calling 结果，提取测试用例列表。"""
+        message = response.choices[0].message
+        if not message.tool_calls:
+            raise AIServiceError("LLM 未使用 Function Calling 输出")
+
+        tool_call = message.tool_calls[0]
+        if tool_call.function.name != "save_test_cases":
+            raise AIServiceError(f"LLM 调用了未知函数: {tool_call.function.name}")
+
+        content = tool_call.function.arguments
         if not content or not content.strip():
-            raise AIServiceError("LLM 返回了空内容")
+            raise AIServiceError("LLM 返回了空的 function arguments")
 
         # 第一步：标准 json.loads
         data = None
@@ -204,7 +305,7 @@ class AIService:
             data = self._try_fix_truncated_json(content)
 
         if data is None:
-            raise AIServiceError("LLM 返回的 JSON 格式无效，修复尝试均失败")
+            raise AIServiceError("LLM 返回的 function arguments JSON 格式无效")
 
         if isinstance(data, dict):
             test_cases = data.get("test_cases", [])
@@ -216,9 +317,21 @@ class AIService:
         if not test_cases:
             raise AIServiceError("LLM 返回了空的测试用例列表")
 
+        required_fields = [
+            "name",
+            "method",
+            "url",
+            "headers",
+            "body",
+            "expected_status",
+            "assertions",
+            "category",
+            "description",
+            "priority",
+        ]
         valid_cases = [
             case for case in test_cases
-            if all(f in case for f in ["name", "method", "url", "expected_status", "category"])
+            if all(f in case for f in required_fields)
         ]
 
         logger.info(f"解析完成: {len(valid_cases)}/{len(test_cases)} 个用例有效")
